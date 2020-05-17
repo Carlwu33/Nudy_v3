@@ -1,0 +1,136 @@
+import sys
+import os
+import _io
+from collections import namedtuple
+from PIL import Image
+
+class Nude:
+    Skin = namedtuple("Skin", "id skin region x y")
+
+    def __init__(self, path_or_image):
+#若 Path_or_image 为 Image.Image类型的实例，直接赋值，若为str类型的实例，则打开图片
+    if isinstance(path_or_image, Image.Image):
+        self.image = path_or_image
+    elif isinstance(path_or_image, str):
+        self.image = Image.open(path_or_image)
+
+# 获得图片所有颜色通道
+    bands = self.image.getbands()
+# 判断是否为单通道图片（即灰度图），是则将灰度图转为RGB图
+    if len(bands) == 1:
+# 新建相同大小的RGB图像
+        new_img = Image.new("RGB", self.image.size)
+# 拷贝灰度图到RGB图(PIL自动进行颜色通道转换）
+        new_img.paste(self.image)
+        f = self.image.filename
+# 替换self.image
+        self.image = new_img
+        self.image.filename = f
+
+# 存储对应图像所有像素的全部 Skin 对象
+        self.skin_map = []
+# 检测到的皮肤区域，元素的索引即为皮肤区域号，元素都是包含一些Skin对象的列表
+        self.detected_region = []
+# 元素区域号代表的都是待合并的区域
+        self.merge_regions = []
+# 整合后的皮肤区域
+        self.skin_region = []
+# 最近合并的两个皮肤区域的区域号，初始化都为-1
+        self.last_from, self.last_to = -1, -1
+# 色情图片判断结果
+        self.result = None
+# 处理得到的信息
+        self.message = None
+# 图像宽和高
+        self.width, self.height = self.image.size
+# 图像总像素
+        self.total_pixels = self.width * self.height
+    def resize(self, maxwidth=1000, maxheight=1000)
+
+        """
+        基于最大宽高比例重新设定图片的大小，
+        注意：这可能影响检测算法的结果
+
+        如果没有变化返回 0
+        原宽度大于最大值， 返回1
+        原高度大于maxheight,返回2
+        原宽高都大于最大值，返回 3
+
+        """
+# ret 用于存储返回值
+        ret = 0
+        if maxwidth:
+            if self.width > maxwidth:
+                wpercent = (maxwidth / self.width)
+                hsize = int((self.height * wpercent)
+                fname = self.image.filename
+# Image.LANCZOS 是重采样滤波器，用于抗锯齿
+                self.image = self.image.resize((maxwidth, hsize), Image.LANCZOS)
+                self.image.filename = fname
+                self.width, self.height = self.image.size
+                self.total_pixels = self.width * self.height
+                ret +=1
+        if maxheight:
+            if self.height > maxheight:
+                hpercent = (maxheight /  float(self.height))
+                wsize = int((float(self.width) * float(hpercent)))
+                fname = self.image.filename
+                self.image = self.image.resize((wsize, maxheight), Image.LANCZOS)
+                self.image.filename = fname
+                self.width, self.height = self.image.size
+                self.total_pixels = self.width * self.height
+                ret += 2
+        return ret
+    def parse(self):
+        # 如果已有结果，返回本对象
+        if self.result is not None:
+            return self
+        # 获得图片所有像素数据
+        pixels = self.image.load()
+
+        # 遍历每个像素，为每个像素创建Skin对象，其中self._classify_skin()这个方法是检测像素颜色是否为肤色:
+        for y in range(self.height):
+            for x in range(self.width):
+# 获取像素RGB三个通道的值, [X, Y]是[(x, y)]的简便写法
+                r = pixels[x, y][0] # red
+                g = pixels[x, y][1] # green
+                b = pixels[x, y][2] # blue
+#判断当前像素是否为肤色
+                isSkin = True if self._classify_skin(r, g, b) else False
+# 给每个像素分配唯一 id值（1, 2, 3 ... height * width), 注意x, y值是从零 开始的
+                _id = x + y * self.width + 1
+# 为每个像素创建一个对应的Skin 对象， 并添加到self.skin_map中
+                self.skin_map.append(self.Skin(_id, isSkin, None, x, y))
+                # 若当前像素不是肤色像色，则跳出本次循环
+                if  not isSkin:
+                    continue
+
+                # 若当前像素是肤色像素，那么就要处理了，先遍历它的相邻像素
+
+                check_indexes = [_id -2, # 当前像素左方的像素
+                                _id - self.width -2, # 当前像素左上方的像素
+                                _id - self.width -1, #当前像素的上方像素
+                                _id - self.width] # 当前像素右上方的像素
+                region = -1 # 用来记录相邻像素所在的区域号，初始化为-1
+
+# 遍历每一个相邻像素的索引
+                for index in check_indexes:
+# 尝试索引相邻像素的Skin对象，没有则跳出循环
+                    try:
+                        self.skin_map[index]
+                    except IndexError:
+                        break
+# 相邻像素若为肤色像素：
+                    if self.skin_map[index].skin:
+# 若相邻像素与当前像素的region均为有效值，且二者不同，且未添加相同的合并任务
+                        if (self.skin_map[index].region != None and
+                                region != None and region != -1 and
+                                self.skin_map[index].region !=region and
+                                self.last_from != region and
+                                self.last_to != self.skin_map[index].region):
+# 那么就添加这两个区域的合并任务
+                        self._add_merge(region, self.skin.skin_map[index].region)
+              # 记录此相邻像素所在的区域号
+              region = self.skin_map[index].region
+
+
